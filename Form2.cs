@@ -24,13 +24,16 @@ namespace ProjectWork
         SpeechSynthesizer synth = new SpeechSynthesizer();
         VideoCaptureDevice camera;
         int j = 0;
+        BackgroundWorker bgWorker;
 
 
         public Form2(VideoCaptureDevice cameraIn, Form1 f)
-        {
-            yoloWrapper = new YoloWrapper(@".\YoloFiles\yolov3-tiny.cfg", @".\YoloFiles\yolov3-tiny.weights", @".\YoloFiles\coco.names");
-            
+        {   
             InitializeComponent();
+            yoloWrapper = new YoloWrapper(@".\YoloFiles\yolov3-tiny.cfg", @".\YoloFiles\yolov3-tiny.weights", @".\YoloFiles\coco.names");
+            bgWorker = new BackgroundWorker();
+            bgWorker.WorkerSupportsCancellation = true;
+            bgWorker.DoWork += BgWorker_DoWork;
             synth.SetOutputToDefaultAudioDevice();
             camera = cameraIn;
             camera.NewFrame += camera_NewFrame;
@@ -40,15 +43,74 @@ namespace ProjectWork
             Log.Location = new Point(0, camera.VideoResolution.FrameSize.Height);
             Log.Size = new Size(camera.VideoResolution.FrameSize.Width-15, 110);
             temp = f;
-            aTimer = new System.Timers.Timer();
-            aTimer.Interval = 2000;
-            aTimer.Elapsed += OnTimedEvent;
-            aTimer.AutoReset = true;
-            aTimer.Enabled = true;
+            //aTimer = new System.Timers.Timer();
+            //aTimer.Interval = 2000;
+            //aTimer.Elapsed += OnTimedEvent;
+            //aTimer.AutoReset = true;
+            //aTimer.Enabled = true;
             Log.ReadOnly = true;
             Log.ScrollBars = ScrollBars.Vertical;
-            Log.Text = "Log:";
+            Log.Text = "Log:";            
+            bgWorker.RunWorkerAsync();
         }
+
+        private void BgWorker_DoWork(object sender, DoWorkEventArgs e)
+        {
+            while (true)
+            {
+                if (bgWorker.CancellationPending == true)
+                {
+                    e.Cancel = true;
+                    break;
+                }
+
+                byte[] bytesImage = null;
+                if (pic.InvokeRequired)
+                    pic.Invoke(new Action(() =>
+                    {
+                        bytesImage = ImageToByte(pic.Image);
+                    }));
+                else
+                    bytesImage = ImageToByte(pic.Image);
+                IEnumerable<Alturos.Yolo.Model.YoloItem> items = null;
+                try
+                {
+                    items = yoloWrapper.Detect(bytesImage);
+                }
+                catch
+                {
+                    continue;
+                }
+                
+                if (items.Count() == 0)
+                {
+                    if (Log.InvokeRequired)
+                        Log.Invoke(new Action(() =>
+                        {
+                            Log.Text += Environment.NewLine + "Log № " + j + " Объекты не определены";
+
+                        }));
+                }
+                foreach (var p in items)
+                {
+
+                    synth.Speak(p.Type);
+                    if (Log.InvokeRequired)
+                        Log.Invoke(new Action(() =>
+                        {
+                            Log.Text += Environment.NewLine + "Log № " + j + " ";
+                            Log.Text += p.Type + " " + p.Confidence * 100 + "%";
+                        }));
+                    else
+                    {
+                        Log.Text += Environment.NewLine + "Log № " + j + " ";
+                        Log.Text += p.Type + " " + p.Confidence * 100 + "%";
+                    }
+                }
+                j++;
+            }
+        }
+
         private void camera_NewFrame(object sender, NewFrameEventArgs eventArgs)
         {
             pic.Image = (Bitmap)eventArgs.Frame.Clone();
@@ -100,8 +162,9 @@ namespace ProjectWork
         }
         private void Form2_FormClosed(object sender, FormClosedEventArgs e)
         {
-            aTimer.Stop();
-            aTimer.Dispose();
+            //aTimer.Stop();
+            //aTimer.Dispose();
+            bgWorker.CancelAsync();
             camera.Stop();
             //temp.Close();
             Application.Exit();
